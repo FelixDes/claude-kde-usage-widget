@@ -5,6 +5,8 @@ KDE Plasma 6 panel widget that shows your Claude API rate limit usage in real ti
 Displays two windows: 5-hour and 7-day, each with a usage bar, utilization percentage, and time until reset. Compact
 view lives in the panel; click to open the full popup.
 
+**KDE Store:** https://www.opendesktop.org/p/2359310
+
 ## How it works
 
 On each refresh the widget runs a shell script that:
