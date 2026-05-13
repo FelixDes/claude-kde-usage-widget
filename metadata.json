@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "org.kde.plasma.claudelimits",
+        "Name": "Claude Limits",
+        "Description": "Shows Claude API rate limit usage",
+        "Icon": "dialog-information",
+        "Category": "Utilities",
+        "Version": "1.0",
+        "License": "MIT",
+        "Authors": [{"Email": "felixdesyatirikov@proton.me", "Name": "Felix"}],
+        "Website": ""
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
