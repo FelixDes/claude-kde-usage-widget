@@ -49,9 +49,36 @@ case "$PROXY_MODE" in
     *)      ;;  # env: curl reads HTTP_PROXY/HTTPS_PROXY automatically
 esac
 
-RESPONSE=$(curl "${CURL_ARGS[@]}" "https://api.anthropic.com/v1/messages" 2>/dev/null)
+do_curl() {
+    curl "${CURL_ARGS[@]}" "https://api.anthropic.com/v1/messages" 2>/dev/null
+}
 
+RESPONSE=$(do_curl)
 HEADERS=$(echo "$RESPONSE" | grep -i "^anthropic-ratelimit")
+
+# On first boot the token may be stale. Spawn claude briefly to trigger
+# OAuth refresh, re-read the token, then retry once.
+if [ -z "$HEADERS" ] && command -v claude >/dev/null 2>&1; then
+    timeout 5 claude -p "x" >/dev/null 2>&1 || true
+
+    CREDS_JSON=$(python3 - <<'PYEOF2'
+import json, sys, os
+try:
+    with open(os.environ['CREDS_FILE']) as f:
+        d = json.load(f)
+    oauth = d['claudeAiOauth']
+    print(oauth['accessToken'])
+    print(oauth.get('subscriptionType', ''))
+except Exception as e:
+    print('', file=sys.stdout)
+    sys.exit(1)
+PYEOF2
+)
+    ACCESS_TOKEN=$(echo "$CREDS_JSON" | sed -n '1p')
+    CURL_ARGS[2]="Authorization: Bearer $ACCESS_TOKEN"
+    RESPONSE=$(do_curl)
+    HEADERS=$(echo "$RESPONSE" | grep -i "^anthropic-ratelimit")
+fi
 
 if [ -z "$HEADERS" ]; then
     echo '{"error": "API call failed or no rate limit headers"}'

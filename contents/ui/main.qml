@@ -72,7 +72,13 @@ PlasmoidItem {
         onTriggered: root.fetchLimits()
     }
 
-    Component.onCompleted: fetchLimits()
+    Timer {
+        id: startupTimer
+        interval: 6000
+        running: true
+        repeat: false
+        onTriggered: root.fetchLimits()
+    }
 
     // ── Compact (panel bar) ──────────────────────────────────────────────────
     compactRepresentation: MouseArea {
@@ -122,9 +128,13 @@ PlasmoidItem {
 
     // ── Full popup ───────────────────────────────────────────────────────────
     fullRepresentation: Item {
+        implicitWidth: 250
+        implicitHeight: 170
+
         Layout.minimumWidth: 250
-        Layout.minimumHeight: Plasmoid.configuration.showTitle ? 170 : 150
-        Layout.preferredWidth: 280
+        Layout.preferredWidth: 250
+        Layout.preferredHeight: 170
+        Layout.maximumHeight: 170
 
         ColumnLayout {
             anchors.fill: parent
