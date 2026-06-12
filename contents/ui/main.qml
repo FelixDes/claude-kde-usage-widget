@@ -175,10 +175,25 @@ PlasmoidItem {
                 visible: root.errorMsg !== "" && !root.loading
             }
 
-            PlasmaComponents.BusyIndicator {
-                Layout.alignment: Qt.AlignHCenter
-                visible: root.firstLoad
-                running: visible
+            // Placeholder fills the bars' space before first data arrives,
+            // keeping title at top and footer at bottom
+            Item {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                visible: !root.hasData
+
+                PlasmaComponents.BusyIndicator {
+                    anchors.centerIn: parent
+                    visible: root.firstLoad
+                    running: visible
+                }
+
+                PlasmaComponents.Label {
+                    anchors.centerIn: parent
+                    text: "Waiting for first update…"
+                    opacity: 0.6
+                    visible: !root.firstLoad && root.errorMsg === ""
+                }
             }
 
             ColumnLayout {
