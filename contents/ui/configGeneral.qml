@@ -5,9 +5,9 @@ import org.kde.kirigami as Kirigami
 
 Kirigami.FormLayout {
     property alias cfg_refreshInterval: refreshSpinBox.value
-    property bool   cfg_showTitle: true
+    property alias cfg_showTitle: showTitleCheck.checked
     property string cfg_proxyMode: "env"
-    property string cfg_proxyUrl:  ""
+    property alias cfg_proxyUrl: proxyUrlField.text
 
     // ── Appearance ────────────────────────────────────────────────────────────
     Kirigami.Heading {
@@ -19,8 +19,6 @@ Kirigami.FormLayout {
     QQC2.CheckBox {
         id: showTitleCheck
         Kirigami.FormData.label: "Show title:"
-        checked: cfg_showTitle
-        onCheckedChanged: cfg_showTitle = checked
     }
 
     // ── Refresh ───────────────────────────────────────────────────────────────
@@ -50,26 +48,18 @@ Kirigami.FormLayout {
     QQC2.ComboBox {
         id: proxyCombo
         Kirigami.FormData.label: "Mode:"
-        model: [
-            { text: "No proxy",              value: "none"   },
-            { text: "System env (HTTP_PROXY)", value: "env"  },
-            { text: "Custom URL",             value: "custom" }
-        ]
-        textRole: "text"
+        model: ["No proxy", "System env (HTTP_PROXY)", "Custom URL"]
         currentIndex: {
-            var modes = ["none", "env", "custom"]
-            var idx = modes.indexOf(cfg_proxyMode)
+            var idx = ["none", "env", "custom"].indexOf(cfg_proxyMode)
             return idx >= 0 ? idx : 1
         }
-        onActivated: cfg_proxyMode = model[currentIndex].value
+        onActivated: cfg_proxyMode = ["none", "env", "custom"][currentIndex]
     }
 
     QQC2.TextField {
         id: proxyUrlField
         Kirigami.FormData.label: "Proxy URL:"
         placeholderText: "http://proxy.example.com:8080"
-        text: cfg_proxyUrl
         visible: cfg_proxyMode === "custom"
-        onTextChanged: cfg_proxyUrl = text
     }
 }

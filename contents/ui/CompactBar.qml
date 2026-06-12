@@ -1,23 +1,21 @@
 import QtQuick
-import QtQuick.Layouts
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
+
+import "../code/utils.js" as Utils
 
 Row {
     id: root
 
     property string label: ""
-    property real utilization: 0
-    property string status: ""
-    property string resetIn: ""
+    // One window object from fetch_limits.sh output (h5 or d7)
+    property var windowData: null
 
-    readonly property color claudeColor: "#DA7756"
-    readonly property bool limited: status === "limited" || status === "blocked"
-    readonly property color barColor: limited
-        ? Kirigami.Theme.negativeTextColor
-        : utilization > 0.85
-            ? "#E8A87C"
-            : claudeColor
+    readonly property real utilization: windowData ? windowData.utilization : 0
+    readonly property string resetIn: windowData ? (windowData.reset_in || "") : ""
+    readonly property color barColor: Utils.barColor(
+        windowData ? windowData.status : "", utilization,
+        Kirigami.Theme.negativeTextColor)
 
     spacing: 2
 

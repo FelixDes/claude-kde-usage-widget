@@ -20,6 +20,14 @@ PlasmoidItem {
     property bool loading: false
     property string lastUpdated: ""
 
+    readonly property var h5: limitData ? limitData.h5 : null
+    readonly property var d7: limitData ? limitData.d7 : null
+    readonly property bool hasData: limitData !== null
+    readonly property bool firstLoad: loading && !hasData
+
+    readonly property int effectiveInterval: Math.max(1, Plasmoid.configuration.refreshInterval || 15)
+    readonly property bool showTitle: Plasmoid.configuration.showTitle !== false
+
     readonly property string scriptPath: Qt.resolvedUrl("../code/fetch_limits.sh").toString().replace("file://", "")
 
     P5Support.DataSource {
@@ -57,13 +65,11 @@ PlasmoidItem {
     function fetchLimits() {
         if (root.loading) return
         root.loading = true
-        var safePath    = root.scriptPath.replace(/'/g, "'\\''")
-        var safeProxy   = (Plasmoid.configuration.proxyUrl || "").replace(/'/g, "'\\''")
-        var proxyMode   = Plasmoid.configuration.proxyMode || "env"
+        var safePath  = root.scriptPath.replace(/'/g, "'\\''")
+        var safeProxy = (Plasmoid.configuration.proxyUrl || "").replace(/'/g, "'\\''")
+        var proxyMode = Plasmoid.configuration.proxyMode || "env"
         executable.connectSource("bash '" + safePath + "' '" + proxyMode + "' '" + safeProxy + "'")
     }
-
-    readonly property int effectiveInterval: Math.max(1, Plasmoid.configuration.refreshInterval || 15)
 
     Timer {
         interval: root.effectiveInterval * 60 * 1000
@@ -72,8 +78,8 @@ PlasmoidItem {
         onTriggered: root.fetchLimits()
     }
 
+    // Delayed first fetch: give the network / session a moment after login
     Timer {
-        id: startupTimer
         interval: 6000
         running: true
         repeat: false
@@ -105,45 +111,46 @@ PlasmoidItem {
 
             CompactBar {
                 label: "5h"
-                utilization: root.limitData ? root.limitData.h5.utilization : 0
-                status:      root.limitData ? root.limitData.h5.status : ""
-                resetIn:     root.limitData ? root.limitData.h5.reset_in : ""
-                visible:     root.limitData !== null
+                windowData: root.h5
+                visible: root.hasData
             }
             CompactBar {
                 label: "7d"
-                utilization: root.limitData ? root.limitData.d7.utilization : 0
-                status:      root.limitData ? root.limitData.d7.status : ""
-                resetIn:     root.limitData ? root.limitData.d7.reset_in : ""
-                visible:     root.limitData !== null
+                windowData: root.d7
+                visible: root.hasData
             }
 
             PlasmaComponents.Label {
-                text: root.loading ? "…" : (root.errorMsg ? "!" : "")
+                text: root.firstLoad ? "…" : (root.errorMsg ? "!" : "")
                 font.pixelSize: 9
-                visible: root.loading || root.errorMsg !== ""
+                visible: root.firstLoad || root.errorMsg !== ""
             }
         }
     }
 
     // ── Full popup ───────────────────────────────────────────────────────────
     fullRepresentation: Item {
-        implicitWidth: 250
-        implicitHeight: 170
+        readonly property int popupWidth: 260
+        readonly property int popupHeight: 190
 
-        Layout.minimumWidth: 250
-        Layout.preferredWidth: 250
-        Layout.preferredHeight: 170
-        Layout.maximumHeight: 170
+        implicitWidth: popupWidth
+        implicitHeight: popupHeight
+
+        Layout.minimumWidth: popupWidth
+        Layout.preferredWidth: popupWidth
+        Layout.minimumHeight: popupHeight
+        Layout.preferredHeight: popupHeight
+        Layout.maximumHeight: popupHeight
 
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: Kirigami.Units.largeSpacing
             spacing: Kirigami.Units.largeSpacing
 
+            // Title — first item in layout, always at top
             RowLayout {
                 Layout.fillWidth: true
-                visible: Plasmoid.configuration.showTitle
+                visible: root.showTitle
 
                 PlasmaComponents.Label {
                     text: "Claude Limits"
@@ -170,7 +177,7 @@ PlasmoidItem {
 
             PlasmaComponents.BusyIndicator {
                 Layout.alignment: Qt.AlignHCenter
-                visible: root.loading && root.limitData === null
+                visible: root.firstLoad
                 running: visible
             }
 
@@ -178,28 +185,22 @@ PlasmoidItem {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 0
-                visible: root.limitData !== null
+                visible: root.hasData
 
                 Item { Layout.fillHeight: true }
 
                 LimitRow {
                     Layout.fillWidth: true
-                    label:       "5-hour window"
-                    utilization: root.limitData ? root.limitData.h5.utilization : 0
-                    status:      root.limitData ? root.limitData.h5.status : ""
-                    resetIn:     root.limitData ? root.limitData.h5.reset_in : ""
-                    resetTs:     root.limitData ? (root.limitData.h5.reset_ts || "") : ""
+                    label: "5-hour window"
+                    windowData: root.h5
                 }
 
                 Item { Layout.fillHeight: true }
 
                 LimitRow {
                     Layout.fillWidth: true
-                    label:       "7-day window"
-                    utilization: root.limitData ? root.limitData.d7.utilization : 0
-                    status:      root.limitData ? root.limitData.d7.status : ""
-                    resetIn:     root.limitData ? root.limitData.d7.reset_in : ""
-                    resetTs:     root.limitData ? (root.limitData.d7.reset_ts || "") : ""
+                    label: "7-day window"
+                    windowData: root.d7
                 }
 
                 Item { Layout.fillHeight: true }
@@ -229,6 +230,7 @@ PlasmoidItem {
                 }
             }
 
+            // Footer: plan · interval · last update
             RowLayout {
                 Layout.alignment: Qt.AlignRight
                 spacing: 4
@@ -249,7 +251,6 @@ PlasmoidItem {
                 }
 
                 PlasmaComponents.Label {
-                    id: intervalLabel
                     text: root.effectiveInterval + " min ·"
                     font.pixelSize: 10
                 }

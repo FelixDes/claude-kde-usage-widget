@@ -3,14 +3,19 @@ import QtQuick.Layouts
 import org.kde.plasma.components as PlasmaComponents
 import org.kde.kirigami as Kirigami
 
+import "../code/utils.js" as Utils
+
 ColumnLayout {
     id: root
 
     property string label: ""
-    property real utilization: 0
-    property string status: ""
-    property string resetIn: ""
-    property string resetTs: ""
+    // One window object from fetch_limits.sh output (h5 or d7)
+    property var windowData: null
+
+    readonly property real utilization: windowData ? windowData.utilization : 0
+    readonly property string status: windowData ? (windowData.status || "") : ""
+    readonly property string resetIn: windowData ? (windowData.reset_in || "") : ""
+    readonly property string resetTs: windowData ? (windowData.reset_ts || "") : ""
 
     readonly property string resetLabel: {
         if (!resetTs) return resetIn
@@ -29,13 +34,8 @@ ColumnLayout {
         return parts.length ? parts.join(" ") : "< 1 min"
     }
 
-    readonly property color claudeColor: "#DA7756"
-    readonly property bool limited: status === "limited" || status === "blocked"
-    readonly property color barColor: limited
-        ? Kirigami.Theme.negativeTextColor
-        : utilization > 0.85
-            ? "#E8A87C"
-            : claudeColor
+    readonly property bool limited: Utils.isLimited(status)
+    readonly property color barColor: Utils.barColor(status, utilization, Kirigami.Theme.negativeTextColor)
 
     spacing: 4
 
