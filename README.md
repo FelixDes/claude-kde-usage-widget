@@ -2,8 +2,10 @@
 
 KDE Plasma 6 panel widget that shows your Claude API rate limit usage in real time.
 
-Displays two windows: 5-hour and 7-day, each with a usage bar, utilization percentage, and time until reset. Compact
-view lives in the panel; click to open the full popup.
+Displays two windows: 5-hour and 7-day, each with a usage bar, utilization percentage, and time until reset. The popup
+also shows Claude's service status and any active incidents pulled from
+[status.claude.com](https://status.claude.com/), so you stay aware of outages; the panel view flags a degraded status
+with a colored dot. Compact view lives in the panel; click to open the full popup.
 
 **KDE Store:** https://www.opendesktop.org/p/2359310
 
@@ -19,6 +21,9 @@ On each refresh the widget runs a shell script that:
 
 > **Note:** Every refresh burns real tokens. The call is as small as possible (1 output token), but it is a real API
 > request that counts against your usage. Set the refresh interval accordingly.
+
+Separately, the widget polls `status.claude.com/api/v2/summary.json` every 2 minutes for service status and active
+incidents. That request is unauthenticated and **does not cost any tokens**.
 
 ## Requirements
 

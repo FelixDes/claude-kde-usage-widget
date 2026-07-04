@@ -75,3 +75,15 @@ function formatReset(resetTs, fallback, nowMs, compact) {
     if (mins > 0) parts.push(mins + " min")
     return parts.join(" ")
 }
+
+// Map a Statuspage severity (indicator or incident impact) to a theme color.
+// Severities: none | minor | major | critical.
+function severityColor(severity, positiveColor, neutralColor, negativeColor, disabledColor) {
+    switch (severity) {
+        case "none":     return positiveColor
+        case "minor":    return neutralColor
+        case "major":    return WARN_COLOR
+        case "critical": return negativeColor
+        default:         return disabledColor
+    }
+}

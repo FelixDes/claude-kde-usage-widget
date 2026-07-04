@@ -54,7 +54,7 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 cp "$SRC_DIR/metadata.json" "$STAGE/"
 cp -r "$SRC_DIR/contents" "$STAGE/"
-chmod +x "$STAGE/contents/code/fetch_limits.sh"
+chmod +x "$STAGE/contents/code/fetch_limits.sh" "$STAGE/contents/code/fetch_status.sh"
 
 if is_installed; then
     "$KPKG" -t Plasma/Applet -u "$STAGE"

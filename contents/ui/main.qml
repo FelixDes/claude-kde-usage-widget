@@ -6,6 +6,8 @@ import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.plasma5support as P5Support
 import org.kde.kirigami as Kirigami
 
+import "../code/utils.js" as Utils
+
 PlasmoidItem {
     id: root
 
@@ -21,6 +23,16 @@ PlasmoidItem {
     property string lastUpdated: ""
     property double nowMs: Date.now()
 
+    // Service status from status.claude.com (free, no token cost).
+    property var statusData: null
+    property string statusError: ""
+
+    readonly property var incidents: statusData && statusData.incidents ? statusData.incidents : []
+    readonly property string statusIndicator: statusData ? (statusData.indicator || "") : ""
+    // Anything other than "none" (or a missing/unknown status) is degraded.
+    readonly property bool statusDegraded: statusData !== null
+        && statusIndicator !== "" && statusIndicator !== "none"
+
     readonly property var h5: limitData ? limitData.h5 : null
     readonly property var d7: limitData ? limitData.d7 : null
     readonly property bool hasData: limitData !== null
@@ -30,6 +42,7 @@ PlasmoidItem {
     readonly property bool showTitle: Plasmoid.configuration.showTitle !== false
 
     readonly property string scriptPath: Qt.resolvedUrl("../code/fetch_limits.sh").toString().replace("file://", "")
+    readonly property string statusScriptPath: Qt.resolvedUrl("../code/fetch_status.sh").toString().replace("file://", "")
 
     P5Support.DataSource {
         id: executable
@@ -73,6 +86,41 @@ PlasmoidItem {
         executable.connectSource("bash '" + safePath + "' '" + proxyMode + "' '" + safeProxy + "'")
     }
 
+    P5Support.DataSource {
+        id: statusExecutable
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            disconnectSource(source)
+
+            var stdout = (data["stdout"] || "").trim()
+            var stderr = data["stderr"] || ""
+
+            if (!stdout) {
+                root.statusError = stderr || "No status output"
+                return
+            }
+            try {
+                var parsed = JSON.parse(stdout)
+                if (parsed.error) {
+                    root.statusError = parsed.error
+                } else {
+                    root.statusData = parsed
+                    root.statusError = ""
+                }
+            } catch(e) {
+                root.statusError = "Status parse error"
+            }
+        }
+    }
+
+    function fetchStatus() {
+        var safePath  = root.statusScriptPath.replace(/'/g, "'\\''")
+        var safeProxy = (Plasmoid.configuration.proxyUrl || "").replace(/'/g, "'\\''")
+        var proxyMode = Plasmoid.configuration.proxyMode || "env"
+        statusExecutable.connectSource("bash '" + safePath + "' '" + proxyMode + "' '" + safeProxy + "'")
+    }
+
     Timer {
         interval: root.effectiveInterval * 60 * 1000
         running: true
@@ -94,6 +142,16 @@ PlasmoidItem {
         running: true
         repeat: false
         onTriggered: root.fetchLimits()
+    }
+
+    // Service status is free to poll, so refresh it on a fixed short cadence
+    // regardless of the (token-burning) limits refresh interval.
+    Timer {
+        interval: 2 * 60 * 1000
+        running: true
+        repeat: true
+        triggeredOnStart: true
+        onTriggered: root.fetchStatus()
     }
 
     // ── Compact (panel bar) ──────────────────────────────────────────────────
@@ -137,6 +195,31 @@ PlasmoidItem {
                 visible: root.hasData
             }
 
+            // Service-status warning: only shown when Claude is degraded.
+            Row {
+                spacing: 3
+                visible: root.statusDegraded
+
+                Rectangle {
+                    width: 6
+                    height: 6
+                    radius: 3
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: Utils.severityColor(
+                        root.statusIndicator,
+                        Kirigami.Theme.positiveTextColor,
+                        Kirigami.Theme.neutralTextColor,
+                        Kirigami.Theme.negativeTextColor,
+                        Kirigami.Theme.disabledTextColor)
+                }
+
+                PlasmaComponents.Label {
+                    text: root.incidents.length > 0 ? "issue" : "degraded"
+                    font.pixelSize: 9
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+
             PlasmaComponents.Label {
                 text: root.firstLoad ? "…" : (root.errorMsg ? "!" : "")
                 font.pixelSize: 9
@@ -148,7 +231,8 @@ PlasmoidItem {
     // ── Full popup ───────────────────────────────────────────────────────────
     fullRepresentation: Item {
         readonly property int popupWidth: 260
-        readonly property int popupHeight: 190
+        // Grow to fit the status line plus one row per active incident.
+        readonly property int popupHeight: 215 + root.incidents.length * 16
 
         implicitWidth: popupWidth
         implicitHeight: popupHeight
@@ -182,6 +266,16 @@ PlasmoidItem {
                     enabled: !root.loading
                     onClicked: root.fetchLimits()
                 }
+            }
+
+            // Service status (status.claude.com)
+            StatusRow {
+                Layout.fillWidth: true
+                indicator: root.statusIndicator
+                description: root.statusData ? (root.statusData.description || "") : ""
+                incidents: root.incidents
+                errorText: root.statusError
+                visible: hasStatus
             }
 
             PlasmaComponents.Label {
