@@ -6,6 +6,8 @@ import org.kde.kirigami as Kirigami
 Kirigami.FormLayout {
     property alias cfg_refreshInterval: refreshSpinBox.value
     property alias cfg_showTitle: showTitleCheck.checked
+    property alias cfg_showServiceStatus: showServiceStatusCheck.checked
+    property alias cfg_statusRefreshInterval: statusRefreshSpinBox.value
     property string cfg_proxyMode: "env"
     property alias cfg_proxyUrl: proxyUrlField.text
 
@@ -21,6 +23,11 @@ Kirigami.FormLayout {
         Kirigami.FormData.label: "Show title:"
     }
 
+    QQC2.CheckBox {
+        id: showServiceStatusCheck
+        Kirigami.FormData.label: "Show service status:"
+    }
+
     // ── Refresh ───────────────────────────────────────────────────────────────
     Kirigami.Heading {
         text: "Refresh"
@@ -30,12 +37,23 @@ Kirigami.FormLayout {
 
     QQC2.SpinBox {
         id: refreshSpinBox
-        Kirigami.FormData.label: "Interval (minutes):"
+        Kirigami.FormData.label: "Limits interval:"
         from: 1
         to: 120
         value: 15
         textFromValue: function(v) { return v + " min" }
         valueFromText: function(t) { return parseInt(t) || 15 }
+    }
+
+    QQC2.SpinBox {
+        id: statusRefreshSpinBox
+        Kirigami.FormData.label: "Status interval:"
+        from: 1
+        to: 120
+        value: 5
+        enabled: showServiceStatusCheck.checked
+        textFromValue: function(v) { return v + " min" }
+        valueFromText: function(t) { return parseInt(t) || 5 }
     }
 
     // ── Proxy ─────────────────────────────────────────────────────────────────

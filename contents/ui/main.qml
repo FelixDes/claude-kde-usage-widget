@@ -26,12 +26,30 @@ PlasmoidItem {
     // Service status from status.claude.com (free, no token cost).
     property var statusData: null
     property string statusError: ""
+    property bool statusLoading: false
+    property double statusUpdatedMs: 0
 
-    readonly property var incidents: statusData && statusData.incidents ? statusData.incidents : []
-    readonly property string statusIndicator: statusData ? (statusData.indicator || "") : ""
-    // Anything other than "none" (or a missing/unknown status) is degraded.
-    readonly property bool statusDegraded: statusData !== null
-        && statusIndicator !== "" && statusIndicator !== "none"
+    readonly property bool showServiceStatus: Plasmoid.configuration.showServiceStatus !== false
+    readonly property int effectiveStatusInterval: Math.max(
+        1, Plasmoid.configuration.statusRefreshInterval || 5)
+    readonly property bool statusFresh: showServiceStatus
+        && statusData !== null
+        && statusUpdatedMs > 0
+        && nowMs - statusUpdatedMs <= (effectiveStatusInterval * 2 + 1) * 60 * 1000
+    readonly property var visibleStatusData: statusFresh ? statusData : null
+    readonly property var incidents: visibleStatusData && visibleStatusData.incidents
+        ? visibleStatusData.incidents : []
+    readonly property string statusIndicator: visibleStatusData
+        ? (visibleStatusData.indicator || "") : ""
+    readonly property string statusDescription: visibleStatusData
+        ? (visibleStatusData.description || "") : ""
+    readonly property string statusSeverity: Utils.aggregateStatusSeverity(
+        statusIndicator, incidents)
+    readonly property string statusDisplayError: showServiceStatus
+        ? (statusError || (statusData !== null && !statusFresh ? "Status data is stale" : ""))
+        : ""
+    readonly property bool statusDegraded: statusFresh
+        && ((statusIndicator !== "" && statusIndicator !== "none") || incidents.length > 0)
 
     readonly property var h5: limitData ? limitData.h5 : null
     readonly property var d7: limitData ? limitData.d7 : null
@@ -91,30 +109,24 @@ PlasmoidItem {
         engine: "executable"
         connectedSources: []
         onNewData: function(source, data) {
+            root.statusLoading = false
             disconnectSource(source)
 
-            var stdout = (data["stdout"] || "").trim()
+            var stdout = data["stdout"] || ""
             var stderr = data["stderr"] || ""
+            var result = Utils.parseStatusOutput(stdout, stderr)
 
-            if (!stdout) {
-                root.statusError = stderr || "No status output"
-                return
-            }
-            try {
-                var parsed = JSON.parse(stdout)
-                if (parsed.error) {
-                    root.statusError = parsed.error
-                } else {
-                    root.statusData = parsed
-                    root.statusError = ""
-                }
-            } catch(e) {
-                root.statusError = "Status parse error"
-            }
+            // Replace the complete snapshot so a failed refresh can never
+            // leave an old green status or stale incidents on screen.
+            root.statusData = result.data
+            root.statusError = result.error
+            root.statusUpdatedMs = result.data ? Date.now() : 0
         }
     }
 
     function fetchStatus() {
+        if (!root.showServiceStatus || root.statusLoading) return
+        root.statusLoading = true
         var safePath  = root.statusScriptPath.replace(/'/g, "'\\''")
         var safeProxy = (Plasmoid.configuration.proxyUrl || "").replace(/'/g, "'\\''")
         var proxyMode = Plasmoid.configuration.proxyMode || "env"
@@ -144,11 +156,10 @@ PlasmoidItem {
         onTriggered: root.fetchLimits()
     }
 
-    // Service status is free to poll, so refresh it on a fixed short cadence
-    // regardless of the (token-burning) limits refresh interval.
+    // Service status is free to poll and has its own configurable cadence.
     Timer {
-        interval: 2 * 60 * 1000
-        running: true
+        interval: root.effectiveStatusInterval * 60 * 1000
+        running: root.showServiceStatus
         repeat: true
         triggeredOnStart: true
         onTriggered: root.fetchStatus()
@@ -162,8 +173,10 @@ PlasmoidItem {
         // reads the Layout.* attached properties; implicitWidth alone is
         // ignored, which is why the applet gets squeezed to icon width.
         readonly property int minimumDesiredWidth: 150
+        readonly property int statusBadgeSpace: statusBadge.visible
+            ? Math.ceil(statusBadge.implicitWidth + 4) : 0
         readonly property int desiredWidth: Math.max(
-            minimumDesiredWidth, Math.ceil(compactCol.width + 8))
+            minimumDesiredWidth, Math.ceil(compactCol.width + statusBadgeSpace + 8))
 
         implicitWidth: desiredWidth
         implicitHeight: compactCol.implicitHeight + 4
@@ -176,7 +189,9 @@ PlasmoidItem {
 
         Column {
             id: compactCol
-            anchors.centerIn: parent
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.horizontalCenterOffset: -compactRoot.statusBadgeSpace / 2
             width: Math.max(compactH5.width, compactD7.width)
             spacing: 2
 
@@ -195,35 +210,40 @@ PlasmoidItem {
                 visible: root.hasData
             }
 
-            // Service-status warning: only shown when Claude is degraded.
-            Row {
-                spacing: 3
-                visible: root.statusDegraded
-
-                Rectangle {
-                    width: 6
-                    height: 6
-                    radius: 3
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: Utils.severityColor(
-                        root.statusIndicator,
-                        Kirigami.Theme.positiveTextColor,
-                        Kirigami.Theme.neutralTextColor,
-                        Kirigami.Theme.negativeTextColor,
-                        Kirigami.Theme.disabledTextColor)
-                }
-
-                PlasmaComponents.Label {
-                    text: root.incidents.length > 0 ? "issue" : "degraded"
-                    font.pixelSize: 9
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-
             PlasmaComponents.Label {
                 text: root.firstLoad ? "…" : (root.errorMsg ? "!" : "")
                 font.pixelSize: 9
                 visible: root.firstLoad || root.errorMsg !== ""
+            }
+        }
+
+        // Keep the warning beside the bars so it does not add a third panel row.
+        Row {
+            id: statusBadge
+            anchors.left: compactCol.right
+            anchors.leftMargin: 4
+            anchors.verticalCenter: compactCol.verticalCenter
+            spacing: 3
+            visible: root.statusDegraded
+
+            Rectangle {
+                width: 6
+                height: 6
+                radius: 3
+                anchors.verticalCenter: parent.verticalCenter
+                color: Utils.severityColor(
+                    root.statusSeverity,
+                    Kirigami.Theme.positiveTextColor,
+                    Kirigami.Theme.neutralTextColor,
+                    Kirigami.Theme.negativeTextColor,
+                    Kirigami.Theme.disabledTextColor)
+            }
+
+            PlasmaComponents.Label {
+                text: root.incidents.length > 0 ? "issue" : "degraded"
+                textFormat: Text.PlainText
+                font.pixelSize: 9
+                anchors.verticalCenter: parent.verticalCenter
             }
         }
     }
@@ -231,8 +251,9 @@ PlasmoidItem {
     // ── Full popup ───────────────────────────────────────────────────────────
     fullRepresentation: Item {
         readonly property int popupWidth: 260
-        // Grow to fit the status line plus one row per active incident.
-        readonly property int popupHeight: 215 + root.incidents.length * 16
+        readonly property int statusExtraHeight: statusRow.visible
+            ? Math.ceil(statusRow.implicitHeight + Kirigami.Units.largeSpacing) : 0
+        readonly property int popupHeight: Math.min(340, 190 + statusExtraHeight)
 
         implicitWidth: popupWidth
         implicitHeight: popupHeight
@@ -264,18 +285,22 @@ PlasmoidItem {
                     QQC2.ToolTip.text: "Refresh now"
                     QQC2.ToolTip.visible: hovered
                     enabled: !root.loading
-                    onClicked: root.fetchLimits()
+                    onClicked: {
+                        root.fetchLimits()
+                        root.fetchStatus()
+                    }
                 }
             }
 
             // Service status (status.claude.com)
             StatusRow {
+                id: statusRow
                 Layout.fillWidth: true
-                indicator: root.statusIndicator
-                description: root.statusData ? (root.statusData.description || "") : ""
+                indicator: root.statusSeverity
+                description: root.statusDescription
                 incidents: root.incidents
-                errorText: root.statusError
-                visible: hasStatus
+                errorText: root.statusDisplayError
+                visible: root.showServiceStatus && hasStatus
             }
 
             PlasmaComponents.Label {

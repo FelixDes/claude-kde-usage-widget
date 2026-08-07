@@ -22,8 +22,8 @@ On each refresh the widget runs a shell script that:
 > **Note:** Every refresh burns real tokens. The call is as small as possible (1 output token), but it is a real API
 > request that counts against your usage. Set the refresh interval accordingly.
 
-Separately, the widget polls `status.claude.com/api/v2/summary.json` every 2 minutes for service status and active
-incidents. That request is unauthenticated and **does not cost any tokens**.
+Separately, the widget polls `status.claude.com/api/v2/summary.json` for service status and active incidents. The
+interval is configurable and defaults to 5 minutes. That request is unauthenticated and **does not cost any tokens**.
 
 ## Requirements
 
@@ -53,11 +53,13 @@ plasmashell --replace &
 
 Right-click the widget → Configure.
 
-| Setting          | Description                                        |
-|------------------|----------------------------------------------------|
-| Show title       | Show/hide the "Claude Limits" heading in the popup |
-| Refresh interval | How often to poll the API (minutes). Default: 15   |
-| Proxy mode       | See below                                          |
+| Setting         | Description                                                 |
+|-----------------|-------------------------------------------------------------|
+| Show title      | Show/hide the "Claude Limits" heading in the popup          |
+| Service status  | Show/hide Claude service status and incident warnings       |
+| Limits interval | How often to poll the limits API (minutes). Default: 15     |
+| Status interval | How often to poll the public status API (minutes). Default: 5 |
+| Proxy mode      | See below                                                   |
 
 ### Proxy settings
 

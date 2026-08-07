@@ -87,3 +87,68 @@ function severityColor(severity, positiveColor, neutralColor, negativeColor, dis
         default:         return disabledColor
     }
 }
+
+function aggregateStatusSeverity(indicator, incidents) {
+    var ranks = { "none": 0, "minor": 1, "major": 2, "critical": 3 }
+    var best = typeof indicator === "string" ? indicator : ""
+    var bestRank = ranks[best] === undefined ? 0 : ranks[best]
+
+    if (Array.isArray(incidents)) {
+        for (var i = 0; i < incidents.length; ++i) {
+            var impact = incidents[i] && typeof incidents[i].impact === "string"
+                ? incidents[i].impact : ""
+            var rank = ranks[impact]
+            if (rank !== undefined && rank > bestRank) {
+                best = impact
+                bestRank = rank
+            }
+        }
+    }
+    return best
+}
+
+function parseStatusOutput(stdout, stderr) {
+    var text = String(stdout || "").trim()
+    if (!text) {
+        var outputError = String(stderr || "").trim()
+        return { "data": null, "error": outputError || "No status output" }
+    }
+
+    try {
+        var parsed = JSON.parse(text)
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+            return { "data": null, "error": "Invalid status response" }
+        if (parsed.error)
+            return { "data": null, "error": String(parsed.error) }
+
+        var indicator = typeof parsed.indicator === "string" ? parsed.indicator : ""
+        if (!indicator)
+            return { "data": null, "error": "Invalid status response" }
+
+        var incidents = []
+        if (Array.isArray(parsed.incidents)) {
+            for (var i = 0; i < parsed.incidents.length; ++i) {
+                var incident = parsed.incidents[i]
+                if (!incident || typeof incident !== "object" || Array.isArray(incident))
+                    continue
+                incidents.push({
+                    "name": typeof incident.name === "string" ? incident.name : "",
+                    "impact": typeof incident.impact === "string" ? incident.impact : "",
+                    "status": typeof incident.status === "string" ? incident.status : "",
+                    "shortlink": typeof incident.shortlink === "string" ? incident.shortlink : ""
+                })
+            }
+        }
+
+        return {
+            "data": {
+                "indicator": indicator,
+                "description": typeof parsed.description === "string" ? parsed.description : "",
+                "incidents": incidents
+            },
+            "error": ""
+        }
+    } catch (e) {
+        return { "data": null, "error": "Status parse error" }
+    }
+}
