@@ -10,9 +10,11 @@ function isLimited(status) {
     return status === "limited" || status === "blocked"
 }
 
-function barColor(status, utilization, negativeColor) {
-    if (isLimited(status))
+function barColor(status, utilization, negativeColor, severity) {
+    if (isLimited(status) || severity === "critical")
         return negativeColor
+    if (severity === "warning")
+        return WARN_COLOR
     return utilization > WARN_THRESHOLD ? WARN_COLOR : CLAUDE_COLOR
 }
 
@@ -74,4 +76,138 @@ function formatReset(resetTs, fallback, nowMs, compact) {
     if (hours > 0) parts.push(hours + " hr")
     if (mins > 0) parts.push(mins + " min")
     return parts.join(" ")
+}
+
+// Map a Statuspage severity (indicator or incident impact) to a theme color.
+// Severities: none | minor | major | critical.
+function severityColor(severity, positiveColor, neutralColor, negativeColor, disabledColor) {
+    switch (severity) {
+        case "none":     return positiveColor
+        case "minor":    return neutralColor
+        case "major":    return WARN_COLOR
+        case "critical": return negativeColor
+        default:         return disabledColor
+    }
+}
+
+function aggregateStatusSeverity(indicator, incidents) {
+    var ranks = { "none": 0, "minor": 1, "major": 2, "critical": 3 }
+    var best = typeof indicator === "string" ? indicator : ""
+    var bestRank = ranks[best] === undefined ? 0 : ranks[best]
+
+    if (Array.isArray(incidents)) {
+        for (var i = 0; i < incidents.length; ++i) {
+            var impact = incidents[i] && typeof incidents[i].impact === "string"
+                ? incidents[i].impact : ""
+            var rank = ranks[impact]
+            if (rank !== undefined && rank > bestRank) {
+                best = impact
+                bestRank = rank
+            }
+        }
+    }
+    return best
+}
+
+function parseStatusOutput(stdout, stderr) {
+    var text = String(stdout || "").trim()
+    if (!text) {
+        var outputError = String(stderr || "").trim()
+        return { "data": null, "error": outputError || "No status output" }
+    }
+
+    try {
+        var parsed = JSON.parse(text)
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+            return { "data": null, "error": "Invalid status response" }
+        if (parsed.error)
+            return { "data": null, "error": String(parsed.error) }
+
+        var indicator = typeof parsed.indicator === "string" ? parsed.indicator : ""
+        if (!indicator)
+            return { "data": null, "error": "Invalid status response" }
+
+        var incidents = []
+        if (Array.isArray(parsed.incidents)) {
+            for (var i = 0; i < parsed.incidents.length; ++i) {
+                var incident = parsed.incidents[i]
+                if (!incident || typeof incident !== "object" || Array.isArray(incident))
+                    continue
+                incidents.push({
+                    "name": typeof incident.name === "string" ? incident.name : "",
+                    "impact": typeof incident.impact === "string" ? incident.impact : "",
+                    "status": typeof incident.status === "string" ? incident.status : "",
+                    "shortlink": typeof incident.shortlink === "string" ? incident.shortlink : ""
+                })
+            }
+        }
+
+        return {
+            "data": {
+                "indicator": indicator,
+                "description": typeof parsed.description === "string" ? parsed.description : "",
+                "incidents": incidents
+            },
+            "error": ""
+        }
+    } catch (e) {
+        return { "data": null, "error": "Status parse error" }
+    }
+}
+
+function parseModelLimitsOutput(stdout, stderr) {
+    var text = String(stdout || "").trim()
+    if (!text) {
+        var outputError = String(stderr || "").trim()
+        return { "data": null, "error": outputError || "No model limits output" }
+    }
+
+    try {
+        var parsed = JSON.parse(text)
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+            return { "data": null, "error": "Invalid model limits response" }
+        if (parsed.error)
+            return { "data": null, "error": String(parsed.error) }
+        if (!Array.isArray(parsed.model_limits))
+            return { "data": null, "error": "Invalid model limits response" }
+
+        var limits = []
+        for (var i = 0; i < parsed.model_limits.length; ++i) {
+            var limit = parsed.model_limits[i]
+            if (!limit || typeof limit !== "object" || Array.isArray(limit))
+                continue
+
+            var utilization = Number(limit.utilization)
+            var label = typeof limit.label === "string" ? limit.label.trim() : ""
+            if (!label || !isFinite(utilization) || utilization < 0)
+                continue
+
+            limits.push({
+                "label": label,
+                "status": typeof limit.status === "string" ? limit.status : "",
+                "severity": typeof limit.severity === "string" ? limit.severity : "",
+                "utilization": utilization,
+                "reset_ts": limit.reset_ts === null || limit.reset_ts === undefined
+                    ? "" : String(limit.reset_ts),
+                "reset_in": typeof limit.reset_in === "string" ? limit.reset_in : ""
+            })
+        }
+        return { "data": limits, "error": "" }
+    } catch (e) {
+        return { "data": null, "error": "Model limits parse error" }
+    }
+}
+
+function findModelLimit(limits, namePrefix) {
+    if (!Array.isArray(limits))
+        return null
+
+    var prefix = String(namePrefix || "").toLowerCase()
+    for (var i = 0; i < limits.length; ++i) {
+        var label = limits[i] && typeof limits[i].label === "string"
+            ? limits[i].label.toLowerCase() : ""
+        if (label.indexOf(prefix) === 0)
+            return limits[i]
+    }
+    return null
 }
