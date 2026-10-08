@@ -15,17 +15,22 @@ Row {
     readonly property string resetIn: windowData ? (windowData.reset_in || "") : ""
     readonly property string resetTs: windowData ? (windowData.reset_ts || "") : ""
     property double nowMs: Date.now()
+    // Dense mode squeezes rows so three bars fit a 44px horizontal panel.
+    property bool dense: false
+    readonly property int fontSize: 10
     readonly property string resetLabel: Utils.formatReset(resetTs, resetIn, nowMs, true)
     readonly property color barColor: Utils.barColor(
         windowData ? windowData.status : "", utilization,
-        Kirigami.Theme.negativeTextColor)
+        Kirigami.Theme.negativeTextColor,
+        windowData ? (windowData.severity || "") : "")
 
     spacing: 2
     width: 16 + 60 + 3 + 25 + resetGroup.implicitWidth + spacing * 4
+    height: dense ? 11 : implicitHeight
 
     PlasmaComponents.Label {
         text: root.label
-        font.pixelSize: 10
+        font.pixelSize: root.fontSize
         width: 16
         anchors.verticalCenter: parent.verticalCenter
         opacity: 0.8
@@ -33,7 +38,7 @@ Row {
 
     Rectangle {
         width: 60
-        height: 6
+        height: root.dense ? 5 : 6
         radius: 2
         color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.15)
         anchors.verticalCenter: parent.verticalCenter
@@ -50,7 +55,7 @@ Row {
 
     PlasmaComponents.Label {
         text: Math.round(root.utilization * 100) + "%"
-        font.pixelSize: 10
+        font.pixelSize: root.fontSize
         width: 25
         anchors.verticalCenter: parent.verticalCenter
     }
@@ -67,8 +72,8 @@ Row {
         Kirigami.Icon {
             id: resetIcon
             source: "view-refresh"
-            width: 12
-            height: 12
+            width: root.dense ? 11 : 12
+            height: root.dense ? 11 : 12
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
         }
@@ -76,7 +81,7 @@ Row {
         PlasmaComponents.Label {
             id: resetText
             text: root.resetLabel
-            font.pixelSize: 10
+            font.pixelSize: root.fontSize
             anchors.left: resetIcon.right
             anchors.leftMargin: 2
             anchors.verticalCenter: parent.verticalCenter

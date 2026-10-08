@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Arch ships current Qt 6 / Plasma 6 QML modules needed to load main.qml.
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git bash python curl \
+            qt6-declarative kirigami libplasma plasma5support
+      - uses: actions/checkout@v4
+      - name: Shell tests
+        run: |
+          for t in tests/test_*.sh; do bash "$t"; done
+      - name: QML tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          for t in tests/tst_*.qml; do
+            /usr/lib/qt6/bin/qmltestrunner -input "$t"
+          done
+
+  release:
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check tag matches metadata version
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("metadata.json"))["KPlugin"]["Version"])')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match metadata.json version $version" >&2
+            exit 1
+          fi
+      - name: Build plasmoid archive
+        run: bash build.sh
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" claude-limits-widget-*.tar.gz \
+            --title "$GITHUB_REF_NAME" --generate-notes

@@ -5,7 +5,7 @@
         "Description": "Shows Claude API rate limit usage",
         "Icon": "dialog-information",
         "Category": "Utilities",
-        "Version": "1.0",
+        "Version": "1.1",
         "License": "MIT",
         "Authors": [{"Email": "felixdesyatirikov@proton.me", "Name": "Felix"}],
         "Website": ""

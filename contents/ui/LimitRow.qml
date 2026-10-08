@@ -20,7 +20,9 @@ ColumnLayout {
     readonly property string resetLabel: Utils.formatReset(resetTs, resetIn, nowMs, false)
 
     readonly property bool limited: Utils.isLimited(status)
-    readonly property color barColor: Utils.barColor(status, utilization, Kirigami.Theme.negativeTextColor)
+    readonly property color barColor: Utils.barColor(
+        status, utilization, Kirigami.Theme.negativeTextColor,
+        windowData ? (windowData.severity || "") : "")
 
     spacing: 4
 

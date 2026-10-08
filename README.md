@@ -2,8 +2,8 @@
 
 KDE Plasma 6 panel widget that shows your Claude API rate limit usage in real time.
 
-Displays two windows: 5-hour and 7-day, each with a usage bar, utilization percentage, and time until reset. The popup
-also shows Claude's service status and any active incidents pulled from
+Displays the 5-hour and 7-day usage windows, plus the separate Fable weekly limit when it is available for your plan.
+Each window has a usage bar, utilization percentage, and time until reset. The popup also shows Claude's service status and any active incidents pulled from
 [status.claude.com](https://status.claude.com/), so you stay aware of outages; the panel view flags a degraded status
 with a colored dot. Compact view lives in the panel; click to open the full popup.
 
@@ -18,6 +18,10 @@ On each refresh the widget runs a shell script that:
    `claude-haiku-4-5-20251001`) with `max_tokens: 1`
 3. Extracts the `anthropic-ratelimit-unified-*` response headers
 4. Returns the parsed values as JSON to the widget
+
+The optional Fable weekly window is read separately from Claude's OAuth usage endpoint every 15 minutes. This request
+does not run a model or consume tokens. Accounts without a model-scoped Fable allowance simply do not show the Fable
+row. Fable usage is part of the regular weekly allowance on eligible plans, not an additional weekly pool.
 
 > **Note:** Every refresh burns real tokens. The call is as small as possible (1 output token), but it is a real API
 > request that counts against your usage. Set the refresh interval accordingly.
@@ -72,3 +76,11 @@ Right-click the widget → Configure.
 ## License
 
 MIT
+
+## Releasing
+
+1. Bump `Version` in `metadata.json`.
+2. Push a matching tag: `git tag v1.1 && git push origin v1.1`.
+3. GitHub Actions runs the tests, builds `claude-limits-widget-v<version>.tar.gz` and attaches it to a GitHub release.
+4. KDE Store (store.kde.org / pling.com) has no public upload API, so upload the archive from the release on the
+   product's "Files" page by hand.
