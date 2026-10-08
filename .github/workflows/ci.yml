@@ -16,7 +16,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed git bash python curl \
             qt6-declarative kirigami libplasma plasma5support
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Shell tests
         run: |
           for t in tests/test_*.sh; do bash "$t"; done
@@ -35,7 +35,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Check tag matches metadata version
         run: |
           version=$(python3 -c 'import json; print(json.load(open("metadata.json"))["KPlugin"]["Version"])')
