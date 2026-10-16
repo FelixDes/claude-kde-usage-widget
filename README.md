@@ -80,7 +80,7 @@ MIT
 ## Releasing
 
 1. Bump `Version` in `metadata.json`.
-2. Push a matching tag: `git tag v1.1 && git push origin v1.1`.
+2. Push a matching tag: `git tag v1.2 && git push origin v1.2`.
 3. GitHub Actions runs the tests, builds `claude-limits-widget-v<version>.tar.gz` and attaches it to a GitHub release.
 4. KDE Store (store.kde.org / pling.com) has no public upload API, so upload the archive from the release on the
    product's "Files" page by hand.
