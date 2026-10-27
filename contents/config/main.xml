@@ -23,5 +23,18 @@
     <entry name="proxyUrl" type="String">
       <default></default>
     </entry>
+    <!-- Monthly plan prices, shown in the statistics window's plan fit. -->
+    <entry name="pricePro" type="Int">
+      <default>20</default>
+    </entry>
+    <entry name="priceMax5" type="Int">
+      <default>100</default>
+    </entry>
+    <entry name="priceMax20" type="Int">
+      <default>200</default>
+    </entry>
+    <entry name="priceCurrency" type="String">
+      <default>$</default>
+    </entry>
   </group>
 </kcfg>

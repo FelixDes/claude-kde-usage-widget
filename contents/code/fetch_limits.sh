@@ -1,78 +1,38 @@
 #!/bin/bash
-# Fetch Claude rate limit headers by making a minimal API call.
-# Outputs JSON for the QML widget to consume.
+# Fetch Claude rate limit headers by making a minimal API call. This costs a
+# few tokens, so the widget only uses it when the free usage endpoint
+# (fetch_usage.sh) is throttled. Outputs JSON for the QML widget to consume.
 #
 # Usage: fetch_limits.sh [proxy_mode] [proxy_url]
 #   proxy_mode: none | env (default) | custom
 
-PROXY_MODE="${1:-env}"
-PROXY_URL="${2:-}"
-CREDS_FILE="${CREDS_FILE:-$HOME/.claude/.credentials.json}"
-export CREDS_FILE
+. "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+setup_proxy "${1:-env}" "${2:-}"
 
 API_URL="https://api.anthropic.com/v1/messages"
 PROBE_BODY='{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}'
 
-err() {
-    printf '{"error": "%s"}\n' "$1"
-    exit 1
+HEADER_FILE=$(mktemp)
+trap 'rm -f "$HEADER_FILE"' EXIT
+
+probe() {
+    : >"$HEADER_FILE"
+    api_request "$1" -o /dev/null -D "$HEADER_FILE" \
+        -H "anthropic-version: 2023-06-01" \
+        -H "content-type: application/json" \
+        -d "$PROBE_BODY" "$API_URL"
 }
 
-# Prints two lines: access token, subscription type.
-read_creds() {
-    python3 - <<'PYEOF'
-import json, os, sys
-try:
-    with open(os.environ['CREDS_FILE']) as f:
-        oauth = json.load(f)['claudeAiOauth']
-    print(oauth['accessToken'])
-    print(oauth.get('subscriptionType', ''))
-except Exception as e:
-    print(str(e), file=sys.stderr)
-    sys.exit(1)
-PYEOF
-}
+with_token probe
+# A 429 still carries the rate limit headers, so only their presence matters.
+HEADERS=$(grep -i '^anthropic-ratelimit' "$HEADER_FILE" | tr -d '\r')
+[ -n "$HEADERS" ] || err "$(http_error "$HTTP_CODE")" "$HTTP_CODE"
 
-load_creds() {
-    local creds
-    creds=$(read_creds) || return 1
-    ACCESS_TOKEN=$(sed -n 1p <<<"$creds")
-    SUBSCRIPTION_TYPE=$(sed -n 2p <<<"$creds")
-    [ -n "$ACCESS_TOKEN" ]
-}
-
-# Prints anthropic-ratelimit-* response headers, empty on failure.
-fetch_headers() {
-    local args=(-si
-        -H "Authorization: Bearer $ACCESS_TOKEN"
-        -H "anthropic-version: 2023-06-01"
-        -H "content-type: application/json"
-        -d "$PROBE_BODY"
-        --max-time 10)
-    case "$PROXY_MODE" in
-        none)   args+=(--noproxy '*') ;;
-        custom) [ -n "$PROXY_URL" ] && args+=(--proxy "$PROXY_URL") ;;
-        *)      ;;  # env: curl reads HTTP_PROXY/HTTPS_PROXY automatically
-    esac
-    curl "${args[@]}" "$API_URL" 2>/dev/null | grep -i '^anthropic-ratelimit'
-}
-
-[ -f "$CREDS_FILE" ] || err "No credentials file at ~/.claude/.credentials.json"
-load_creds || err "Failed to read access token"
-
-HEADERS=$(fetch_headers)
-
-# Token may be stale (e.g. right after boot). Spawn claude briefly to
-# trigger OAuth refresh, re-read the token, then retry once.
-if [ -z "$HEADERS" ] && command -v claude >/dev/null 2>&1; then
-    timeout 5 claude -p "x" >/dev/null 2>&1 || true
-    load_creds && HEADERS=$(fetch_headers)
-fi
-
-[ -n "$HEADERS" ] || err "API call failed or no rate limit headers"
-
-export HEADERS SUBSCRIPTION_TYPE
-python3 - <<'PYEOF'
+load_creds || true
+SUBSCRIPTION_TYPE="$CREDS_PLAN"
+SUBSCRIPTION_TIER="$CREDS_TIER"
+export HEADERS SUBSCRIPTION_TYPE SUBSCRIPTION_TIER
+OUTPUT=$(python3 - <<'PYEOF'
 import json, os, re, time
 
 raw = os.environ['HEADERS']
@@ -114,7 +74,9 @@ def window(prefix):
         "reset_in": fmt_reset(reset),
     }
 
+tier = os.environ.get("SUBSCRIPTION_TIER", "")
 result = {
+    "source": "probe",
     "status": get("anthropic-ratelimit-unified-status"),
     "fallback": get("anthropic-ratelimit-unified-fallback"),
     "fallback_pct": get("anthropic-ratelimit-unified-fallback-percentage"),
@@ -122,7 +84,11 @@ result = {
     "h5": window("5h"),
     "d7": window("7d"),
     "plan": os.environ.get("SUBSCRIPTION_TYPE", ""),
+    "tier": int(tier) if tier.isdigit() else None,
     "updated_at": int(time.time()),
 }
 print(json.dumps(result))
 PYEOF
+)
+printf '%s\n' "$OUTPUT"
+record_history "$OUTPUT"

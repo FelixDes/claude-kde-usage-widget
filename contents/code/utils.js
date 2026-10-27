@@ -211,3 +211,19 @@ function findModelLimit(limits, namePrefix) {
     }
     return null
 }
+
+// Delay before retry number `attempt` (0-based) after a failed fetch: doubles
+// from baseMs and is capped at maxMs (normally the regular refresh interval).
+function retryDelayMs(attempt, baseMs, maxMs) {
+    var n = Math.max(0, Math.floor(Number(attempt) || 0))
+    return Math.min(baseMs * Math.pow(2, Math.min(n, 20)), maxMs)
+}
+
+// "max" + 5 -> "Max 5x"; tier is the usage multiplier relative to Pro.
+function planLabel(plan, tier) {
+    var name = String(plan || "")
+    if (!name)
+        return ""
+    name = name.charAt(0).toUpperCase() + name.slice(1)
+    return tier > 1 ? name + " " + tier + "x" : name
+}

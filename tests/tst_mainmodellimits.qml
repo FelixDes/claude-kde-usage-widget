@@ -80,4 +80,22 @@ TestCase {
         widget.nowMs = baseMs + 47 * 60 * 1000
         compare(widget.fable, null)
     }
+
+    function test_statsButtonOpensOneWindow() {
+        var widget = widgetLoader.item
+        var full = widget.fullRepresentation.createObject(testCase)
+        var button = findChild(full, "statsButton")
+        verify(button !== null)
+        button.clicked()
+        verify(widget.statsWindow !== null)
+        tryCompare(widget.statsWindow, "visible", true)
+        var first = widget.statsWindow
+        widget.openStats()
+        compare(widget.statsWindow, first)
+        compare(first.historyScriptPath.indexOf("history.py") > 0, true)
+
+        first.destroy()
+        widget.statsWindow = null
+        full.destroy()
+    }
 }

@@ -17,11 +17,18 @@ PlasmoidItem {
     // Setting preferredRepresentation: fullRepresentation here forces the
     // popup to render inline in the panel — don't do it.
 
+    // 5h/7d limits. They normally come from the free OAuth usage endpoint
+    // (fetch_usage.sh); the token-costing probe (fetch_limits.sh) is only a
+    // fallback while that endpoint is throttled.
     property var limitData: null
     property string errorMsg: ""
     property bool loading: false
+    property bool probeLoading: false
     property string lastUpdated: ""
     property double nowMs: Date.now()
+    // Consecutive failures, used to back off retries (the network or VPN may
+    // still be coming up right after login).
+    property int limitsRetries: 0
 
     // Service status from status.claude.com (free, no token cost).
     property var statusData: null
@@ -29,13 +36,15 @@ PlasmoidItem {
     property bool statusLoading: false
     property double statusUpdatedMs: 0
 
-    // Optional per-model weekly limits (currently Fable) from the OAuth usage
-    // endpoint. Kept separate so a throttled endpoint cannot break 5h/7d.
+    // Optional per-model weekly limits (currently Fable), from the same usage
+    // response. Kept through probe fallbacks; modelLimitsFresh hides old data.
     property var modelLimitData: []
-    property string modelLimitsError: ""
-    property bool modelLimitsLoading: false
     property double modelLimitsUpdatedMs: 0
-    property double modelLimitsLastAttemptMs: 0
+
+    // Bumped after every successful fetch so an open statistics window can
+    // reload the history.
+    property int historyRevision: 0
+    property var statsWindow: null
 
     readonly property bool showServiceStatus: Plasmoid.configuration.showServiceStatus !== false
     readonly property int effectiveStatusInterval: Math.max(
@@ -59,68 +68,133 @@ PlasmoidItem {
     readonly property bool statusDegraded: statusFresh
         && ((statusIndicator !== "" && statusIndicator !== "none") || incidents.length > 0)
 
-    readonly property int modelLimitsInterval: 15
     readonly property bool modelLimitsFresh: modelLimitsUpdatedMs > 0
-        && nowMs - modelLimitsUpdatedMs <= (modelLimitsInterval * 3 + 1) * 60 * 1000
+        && nowMs - modelLimitsUpdatedMs <= (effectiveInterval * 3 + 1) * 60 * 1000
     readonly property var fable: modelLimitsFresh
         ? Utils.findModelLimit(modelLimitData, "fable") : null
 
     readonly property var h5: limitData ? limitData.h5 : null
     readonly property var d7: limitData ? limitData.d7 : null
     readonly property bool hasData: limitData !== null
-    readonly property bool firstLoad: loading && !hasData
-    readonly property bool anyLoading: loading || statusLoading || modelLimitsLoading
+    readonly property bool firstLoad: (loading || probeLoading) && !hasData
+    readonly property bool anyLoading: loading || probeLoading || statusLoading
 
-    readonly property int effectiveInterval: Math.max(1, Plasmoid.configuration.refreshInterval || 15)
+    // The usage endpoint is shared with Claude Code and throttles hard, so
+    // polling is never faster than every 5 minutes.
+    readonly property int effectiveInterval: Math.max(5, Plasmoid.configuration.refreshInterval || 15)
     readonly property bool showTitle: Plasmoid.configuration.showTitle !== false
     readonly property string proxyMode: {
         var configured = Plasmoid.configuration.proxyMode || "env"
         return ["none", "env", "custom"].indexOf(configured) >= 0 ? configured : "env"
     }
 
-    readonly property string scriptPath: Qt.resolvedUrl("../code/fetch_limits.sh").toString().replace("file://", "")
+    readonly property string usageScriptPath: Qt.resolvedUrl("../code/fetch_usage.sh").toString().replace("file://", "")
+    readonly property string probeScriptPath: Qt.resolvedUrl("../code/fetch_limits.sh").toString().replace("file://", "")
     readonly property string statusScriptPath: Qt.resolvedUrl("../code/fetch_status.sh").toString().replace("file://", "")
-    readonly property string modelLimitsScriptPath: Qt.resolvedUrl("../code/fetch_model_limits.sh").toString().replace("file://", "")
+    readonly property string historyScriptPath: Qt.resolvedUrl("../code/history.py").toString().replace("file://", "")
+
+    function scriptCommand(path) {
+        var safePath  = path.replace(/'/g, "'\\''")
+        var safeProxy = (Plasmoid.configuration.proxyUrl || "").replace(/'/g, "'\\''")
+        return "bash '" + safePath + "' '" + root.proxyMode + "' '" + safeProxy + "'"
+    }
+
+    function parseScriptOutput(data) {
+        var stdout = (data["stdout"] || "").trim()
+        if (!stdout)
+            return { "error": data["stderr"] || "No output from script" }
+        try {
+            var parsed = JSON.parse(stdout)
+            return parsed && typeof parsed === "object" ? parsed : { "error": "Invalid output" }
+        } catch (e) {
+            return { "error": "Parse error: " + stdout.substring(0, 80) }
+        }
+    }
+
+    function limitsSucceeded(parsed) {
+        root.limitData = parsed
+        root.errorMsg = ""
+        root.limitsRetries = 0
+        limitsRetryTimer.stop()
+        root.nowMs = Date.now()
+        var now = new Date(root.nowMs)
+        root.lastUpdated = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0")
+        root.historyRevision += 1
+    }
+
+    function limitsFailed(message) {
+        root.errorMsg = message
+        limitsRetryTimer.interval = Utils.retryDelayMs(
+            root.limitsRetries, 15 * 1000, root.effectiveInterval * 60 * 1000)
+        root.limitsRetries += 1
+        limitsRetryTimer.restart()
+    }
 
     P5Support.DataSource {
-        id: executable
+        id: usageExecutable
         engine: "executable"
         connectedSources: []
         onNewData: function(source, data) {
             root.loading = false
             disconnectSource(source)
 
-            var stdout = data["stdout"] || ""
-            var stderr = data["stderr"] || ""
-
-            if (!stdout.trim()) {
-                root.errorMsg = stderr || "No output from script"
+            var parsed = root.parseScriptOutput(data)
+            if (parsed.error) {
+                // Throttled or odd response: the probe still knows 5h/7d.
+                if (parsed.fallback === true)
+                    root.fetchProbe()
+                else
+                    root.limitsFailed(parsed.error)
                 return
             }
-            try {
-                var parsed = JSON.parse(stdout.trim())
-                if (parsed.error) {
-                    root.errorMsg = parsed.error
-                    root.limitData = null
-                } else {
-                    root.limitData = parsed
-                    root.errorMsg = ""
-                    root.nowMs = Date.now()
-                    var now = new Date(root.nowMs)
-                    root.lastUpdated = now.getHours() + ":" + String(now.getMinutes()).padStart(2, "0")
-                }
-            } catch(e) {
-                root.errorMsg = "Parse error: " + stdout.substring(0, 80)
+            if (Array.isArray(parsed.model_limits)) {
+                root.modelLimitData = Utils.parseModelLimitsOutput(
+                    JSON.stringify({ "model_limits": parsed.model_limits }), "").data || []
+                root.modelLimitsUpdatedMs = Date.now()
             }
+            root.limitsSucceeded(parsed)
         }
     }
 
-    function fetchLimits() {
-        if (root.loading) return
+    function fetchUsage() {
+        if (root.loading || root.probeLoading) return
         root.loading = true
-        var safePath  = root.scriptPath.replace(/'/g, "'\\''")
-        var safeProxy = (Plasmoid.configuration.proxyUrl || "").replace(/'/g, "'\\''")
-        executable.connectSource("bash '" + safePath + "' '" + root.proxyMode + "' '" + safeProxy + "'")
+        usageExecutable.connectSource(root.scriptCommand(root.usageScriptPath))
+    }
+
+    P5Support.DataSource {
+        id: probeExecutable
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            root.probeLoading = false
+            disconnectSource(source)
+
+            var parsed = root.parseScriptOutput(data)
+            if (parsed.error) {
+                root.limitData = null
+                root.limitsFailed(parsed.error)
+                return
+            }
+            root.limitsSucceeded(parsed)
+        }
+    }
+
+    function fetchProbe() {
+        if (root.probeLoading) return
+        root.probeLoading = true
+        probeExecutable.connectSource(root.scriptCommand(root.probeScriptPath))
+    }
+
+    // Kept for callers that just want "refresh the limits".
+    function fetchLimits() {
+        root.fetchUsage()
+    }
+
+    Timer {
+        id: limitsRetryTimer
+        repeat: false
+        onTriggered: root.fetchUsage()
     }
 
     P5Support.DataSource {
@@ -146,51 +220,46 @@ PlasmoidItem {
     function fetchStatus() {
         if (!root.showServiceStatus || root.statusLoading) return
         root.statusLoading = true
-        var safePath  = root.statusScriptPath.replace(/'/g, "'\\''")
-        var safeProxy = (Plasmoid.configuration.proxyUrl || "").replace(/'/g, "'\\''")
-        statusExecutable.connectSource("bash '" + safePath + "' '" + root.proxyMode + "' '" + safeProxy + "'")
+        statusExecutable.connectSource(root.scriptCommand(root.statusScriptPath))
     }
 
-    P5Support.DataSource {
-        id: modelLimitsExecutable
-        engine: "executable"
-        connectedSources: []
-        onNewData: function(source, data) {
-            root.modelLimitsLoading = false
-            disconnectSource(source)
-
-            var result = Utils.parseModelLimitsOutput(
-                data["stdout"] || "", data["stderr"] || "")
-            if (result.data === null) {
-                // Keep the last successful snapshot for transient 429/network
-                // failures. modelLimitsFresh eventually hides genuinely stale data.
-                root.modelLimitsError = result.error
+    function openStats() {
+        if (root.statsWindow === null) {
+            var component = Qt.createComponent("StatsWindow.qml")
+            if (component.status !== Component.Ready) {
+                console.warn("StatsWindow:", component.errorString())
                 return
             }
-
-            root.modelLimitData = result.data
-            root.modelLimitsError = ""
-            root.modelLimitsUpdatedMs = Date.now()
+            root.statsWindow = component.createObject(null, {
+                "historyScriptPath": root.historyScriptPath,
+                "revision": Qt.binding(function() { return root.historyRevision }),
+                "liveData": Qt.binding(function() { return root.limitData }),
+                "prices": Qt.binding(function() {
+                    var cfg = Plasmoid.configuration || {}
+                    return {
+                        "1": cfg.pricePro,
+                        "5": cfg.priceMax5,
+                        "20": cfg.priceMax20,
+                        "currency": cfg.priceCurrency || "$"
+                    }
+                })
+            })
         }
+        root.statsWindow.show()
+        root.statsWindow.raise()
+        root.statsWindow.requestActivate()
     }
 
-    function fetchModelLimits(force) {
-        if (root.modelLimitsLoading) return
-        var attemptMs = Date.now()
-        if (!force && attemptMs - root.modelLimitsLastAttemptMs < 60 * 1000) return
-        root.modelLimitsLoading = true
-        root.modelLimitsLastAttemptMs = attemptMs
-        var safePath = root.modelLimitsScriptPath.replace(/'/g, "'\\''")
-        var safeProxy = (Plasmoid.configuration.proxyUrl || "").replace(/'/g, "'\\''")
-        modelLimitsExecutable.connectSource(
-            "bash '" + safePath + "' '" + root.proxyMode + "' '" + safeProxy + "'")
+    Component.onDestruction: {
+        if (root.statsWindow !== null)
+            root.statsWindow.destroy()
     }
 
     Timer {
         interval: root.effectiveInterval * 60 * 1000
         running: true
         repeat: true
-        onTriggered: root.fetchLimits()
+        onTriggered: root.fetchUsage()
     }
 
     // Keep reset countdowns moving without making extra API requests.
@@ -206,7 +275,7 @@ PlasmoidItem {
         interval: 6000
         running: true
         repeat: false
-        onTriggered: root.fetchLimits()
+        onTriggered: root.fetchUsage()
     }
 
     // Service status is free to poll and has its own configurable cadence.
@@ -216,23 +285,6 @@ PlasmoidItem {
         repeat: true
         triggeredOnStart: true
         onTriggered: root.fetchStatus()
-    }
-
-    // The usage endpoint is shared with Claude Code and rate-limits more
-    // aggressively than the inference API, so model-scoped weekly limits use
-    // a conservative independent cadence.
-    Timer {
-        interval: root.modelLimitsInterval * 60 * 1000
-        running: true
-        repeat: true
-        onTriggered: root.fetchModelLimits()
-    }
-
-    Timer {
-        interval: 8000
-        running: true
-        repeat: false
-        onTriggered: root.fetchModelLimits()
     }
 
     // ── Compact (panel bar) ──────────────────────────────────────────────────
@@ -372,25 +424,29 @@ PlasmoidItem {
             // Title — first item in layout, always at top
             RowLayout {
                 Layout.fillWidth: true
-                visible: root.showTitle
 
                 PlasmaComponents.Label {
                     text: "Claude Limits"
                     font.bold: true
                     font.pixelSize: 14
+                    visible: root.showTitle
                 }
                 Item { Layout.fillWidth: true }
                 PlasmaComponents.ToolButton {
+                    objectName: "statsButton"
+                    icon.name: "office-chart-line"
+                    QQC2.ToolTip.text: "Usage statistics"
+                    QQC2.ToolTip.visible: hovered
+                    onClicked: root.openStats()
+                }
+                PlasmaComponents.ToolButton {
                     icon.name: "view-refresh"
-                    QQC2.ToolTip.text: root.modelLimitsError !== ""
-                        ? "Refresh now\nFable: " + root.modelLimitsError
-                        : "Refresh now"
+                    QQC2.ToolTip.text: "Refresh now"
                     QQC2.ToolTip.visible: hovered
                     enabled: !root.anyLoading
                     onClicked: {
-                        root.fetchLimits()
+                        root.fetchUsage()
                         root.fetchStatus()
-                        root.fetchModelLimits(true)
                     }
                 }
             }
@@ -411,7 +467,7 @@ PlasmoidItem {
                 text: root.errorMsg
                 color: Kirigami.Theme.negativeTextColor
                 wrapMode: Text.WordWrap
-                visible: root.errorMsg !== "" && !root.loading
+                visible: root.errorMsg !== "" && !root.loading && !root.probeLoading
             }
 
             // Placeholder fills the bars' space before first data arrives,
@@ -482,7 +538,7 @@ PlasmoidItem {
 
                 RowLayout {
                     Layout.fillWidth: true
-                    visible: root.limitData && root.limitData.fallback
+                    visible: !!(root.limitData && root.limitData.fallback)
 
                     PlasmaComponents.Label {
                         text: "Fallback:"
@@ -513,9 +569,10 @@ PlasmoidItem {
                 visible: !root.anyLoading
 
                 PlasmaComponents.Label {
-                    text: root.limitData && root.limitData.plan ? (root.limitData.plan.charAt(0).toUpperCase() + root.limitData.plan.slice(1)) + " ·" : ""
+                    text: root.limitData && root.limitData.plan
+                        ? Utils.planLabel(root.limitData.plan, root.limitData.tier) + " ·" : ""
                     font.pixelSize: 10
-                    visible: root.limitData && root.limitData.plan
+                    visible: !!(root.limitData && root.limitData.plan)
                 }
 
                 Kirigami.Icon {

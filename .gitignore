@@ -2,3 +2,4 @@
 .claude/
 *.iml
 *.tar.gz
+__pycache__/

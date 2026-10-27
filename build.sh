@@ -19,7 +19,7 @@ cp -r "$SRC_DIR/contents" "$STAGE/"
 [ -f "$SRC_DIR/LICENSE" ] && cp "$SRC_DIR/LICENSE" "$STAGE/"
 chmod +x "$STAGE/contents/code/fetch_limits.sh" \
     "$STAGE/contents/code/fetch_status.sh" \
-    "$STAGE/contents/code/fetch_model_limits.sh"
+    "$STAGE/contents/code/fetch_usage.sh"
 
 # Archive contents at top level (metadata.json in root) — the layout
 # kpackagetool6 and the KDE Store expect.
